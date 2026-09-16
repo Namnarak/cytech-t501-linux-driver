@@ -80,6 +80,7 @@ struct t501_state {
 	struct input_dev *pen;
 	struct input_dev *pad;
 	struct input_dev *keys;
+	struct input_dev *scroll;
 	u8 ifnum;
 	bool touching;
 	u16 last_pad_state;
@@ -147,9 +148,24 @@ static const struct t501_pad_button t501_pad_buttons[] = {
 	{ 0x0400, BTN_TRIGGER_HAPPY2, "Pad12" },
 };
 
-static void t501_emit_legacy_shortcut(struct input_dev *keys, int index, bool down)
+static void t501_emit_legacy_shortcut(struct t501_state *st, int index, bool down)
 {
+	struct input_dev *keys = st->keys;
 	int value = down ? 1 : 0;
+
+	/* Pad7/Pad9 are scroll buttons on the vendor layout. KEY_SCROLLUP/DOWN
+	 * are keyboard keycodes and do not generate a mouse wheel event in
+	 * Wayland compositors. Emit REL_WHEEL on a dedicated pointer device. */
+	if ((index == 6 || index == 8) && st->scroll) {
+		if (down) {
+			input_report_rel(st->scroll, REL_WHEEL, index == 6 ? 1 : -1);
+			input_sync(st->scroll);
+		}
+		return;
+	}
+
+	if (!keys)
+		return;
 
 	switch (index) {
 	case 0:
@@ -173,13 +189,11 @@ static void t501_emit_legacy_shortcut(struct input_dev *keys, int index, bool do
 		input_report_key(keys, KEY_RIGHTBRACE, value);
 		break;
 	case 6:
-		input_report_key(keys, KEY_SCROLLUP, value);
 		break;
 	case 7:
 		input_report_key(keys, KEY_TAB, value);
 		break;
 	case 8:
-		input_report_key(keys, KEY_SCROLLDOWN, value);
 		break;
 	case 9:
 		input_report_key(keys, KEY_SPACE, value);
@@ -222,9 +236,10 @@ static void t501_report_pad(struct t501_state *st, u16 raw)
 			continue;
 
 		input_report_key(st->pad, button->code, is_down);
-		if (READ_ONCE(legacy_pad_shortcuts) && st->keys) {
-			t501_emit_legacy_shortcut(st->keys, i, is_down);
-			input_sync(st->keys);
+		if (READ_ONCE(legacy_pad_shortcuts)) {
+			t501_emit_legacy_shortcut(st, i, is_down);
+			if (st->keys)
+				input_sync(st->keys);
 		}
 		if (unlikely(debug_packets))
 			hid_info(st->hdev, "%s %s (raw=0x%04x)\n",
@@ -525,6 +540,33 @@ static int t501_create_keys(struct t501_state *st)
 	return 0;
 }
 
+static int t501_create_scroll(struct t501_state *st)
+{
+	struct input_dev *scroll;
+	int ret;
+
+	scroll = devm_input_allocate_device(&st->hdev->dev);
+	if (!scroll)
+		return -ENOMEM;
+
+	scroll->name = "Cytech T501 Pad Scroll";
+	scroll->phys = st->hdev->phys;
+	scroll->id.bustype = BUS_USB;
+	scroll->id.vendor = T501_VENDOR_ID;
+	scroll->id.product = T501_PRODUCT_ID;
+	scroll->id.version = st->hdev->version;
+	scroll->dev.parent = &st->hdev->dev;
+
+	__set_bit(INPUT_PROP_POINTER, scroll->propbit);
+	input_set_capability(scroll, EV_REL, REL_WHEEL);
+
+	ret = input_register_device(scroll);
+	if (ret)
+		return ret;
+	st->scroll = scroll;
+	return 0;
+}
+
 static int t501_enable_full_mode(struct hid_device *hdev)
 {
 	static const u8 reports[][8] = {
@@ -600,6 +642,9 @@ static int t501_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		if (ret)
 			return ret;
 		ret = t501_create_pad(st);
+		if (ret)
+			return ret;
+		ret = t501_create_scroll(st);
 		if (ret)
 			return ret;
 		ret = t501_create_keys(st);
