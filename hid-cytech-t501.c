@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * hid-cytech-t501.c - native Linux HID driver for SZ PING-IT / Gotop T501
+ * Native Linux HID driver for SZ PING-IT / Gotop T501
  * USB ID 08f2:6811 ("[T501] Driver Inside Tablet")
  *
  * Protocol evidence comes from the vendor Windows driver and the 2018 macOS
@@ -44,12 +44,9 @@
  * They are not sent by default; the proven Windows full-area sequence below
  * is safer on this exact firmware.
  */
-static const u8 t501_mac_rotate_landscape[8] __maybe_unused =
-	{ 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-static const u8 t501_mac_rotate_portrait[8] __maybe_unused =
-	{ 0x08, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
-static const u8 t501_mac_switch_tablet[8] __maybe_unused =
-	{ 0x08, 0x05, 0x05, 0xe0, 0x00, 0x00, 0x00, 0x00 };
+static const u8 t501_mac_rotate_landscape[8] __maybe_unused = { 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+static const u8 t501_mac_rotate_portrait[8] __maybe_unused = { 0x08, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+static const u8 t501_mac_switch_tablet[8] __maybe_unused = { 0x08, 0x05, 0x05, 0xe0, 0x00, 0x00, 0x00, 0x00 };
 
 static int pressure_hover = 1740;
 module_param(pressure_hover, int, 0644);
@@ -155,7 +152,8 @@ static void t501_emit_legacy_shortcut(struct t501_state *st, int index, bool dow
 
 	/* Pad7/Pad9 are scroll buttons on the vendor layout. KEY_SCROLLUP/DOWN
 	 * are keyboard keycodes and do not generate a mouse wheel event in
-	 * Wayland compositors. Emit REL_WHEEL on a dedicated pointer device. */
+	 * Wayland compositors. Emit REL_WHEEL on a dedicated pointer device.
+	 */
 	if ((index == 6 || index == 8) && st->scroll) {
 		if (down) {
 			input_report_rel(st->scroll, REL_WHEEL, index == 6 ? 1 : -1);
@@ -366,6 +364,7 @@ static int t501_start_data_transport(struct t501_state *st)
 
 	for (i = 0; i < alts->desc.bNumEndpoints; i++) {
 		struct usb_endpoint_descriptor *candidate = &alts->endpoint[i].desc;
+
 		if (usb_endpoint_is_int_in(candidate) &&
 		    usb_endpoint_maxp(candidate) >= T501_PC_MIN_REPORT_SIZE) {
 			ep = candidate;
@@ -587,7 +586,8 @@ static int t501_enable_full_mode(struct hid_device *hdev)
 	for (i = 0; i < ARRAY_SIZE(reports); i++) {
 		memcpy(buf, reports[i], 8);
 		/* Mirror the vendor/userspace path exactly: bmRequestType=0x21,
-		 * SET_REPORT, wValue=0x0308, wIndex=2. */
+		 * SET_REPORT, wValue=0x0308, wIndex=2.
+		 */
 		ret = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
 				      HID_REQ_SET_REPORT,
 				      USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
@@ -599,10 +599,10 @@ static int t501_enable_full_mode(struct hid_device *hdev)
 		} else if (ret < 0) {
 			hid_err(hdev, "full-area init report %d failed: %d\n", i + 1, ret);
 			break;
-		} else {
-			/* usb_control_msg returns the number of bytes transferred. */
-			ret = 0;
 		}
+
+		/* usb_control_msg returns the number of bytes transferred. */
+		ret = 0;
 		msleep(20);
 	}
 	kfree(buf);

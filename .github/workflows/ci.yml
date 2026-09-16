@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  kernel-module:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed git base-devel linux-headers clang llvm perl
+      - uses: actions/checkout@v4
+      - name: Locate kernel build tree
+        id: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          KDIR="$(find /usr/lib/modules -mindepth 2 -maxdepth 2 -type d -name build | head -n1)"
+          test -n "$KDIR"
+          echo "kdir=$KDIR" >> "$GITHUB_OUTPUT"
+      - name: Check kernel style
+        run: '${{ steps.kernel.outputs.kdir }}/scripts/checkpatch.pl --no-tree -f hid-cytech-t501.c'
+      - name: Build module
+        run: make LLVM=1 KDIR='${{ steps.kernel.outputs.kdir }}'
