@@ -77,7 +77,7 @@ struct t501_state {
 	struct input_dev *pad;
 	u8 ifnum;
 	bool touching;
-	u16 last_pad_key;
+	u16 last_pad_state;
 	u64 packets;
 	struct urb *data_urb;
 	u8 *data_buf;
@@ -113,80 +113,68 @@ static int t501_normalize_pressure(u16 raw)
 }
 
 struct t501_pad_button {
-	u16 raw;
+	u16 active_low_mask;
 	u16 code;
 	const char *name;
 };
 
 /*
- * The T501 firmware sends one 16-bit value for each frame button.  Older
- * versions of this driver translated those values directly into shortcuts
- * (E/B/Ctrl/etc).  Expose them as real Linux pad buttons instead so the
- * compositor or an application can remap them without changing the driver.
+ * The two pad bytes are an active-low bitfield, not a single button code.
+ * Idle is 0xff33. Each physical frame button clears one bit. Multiple
+ * buttons can therefore be pressed at once (for example 0xfa33 = Pad8+Pad12).
  *
- * BTN_0..BTN_9 are the canonical evdev tablet-pad button range.  The T501 has
- * two additional frame buttons, exposed as BTN_TRIGGER_HAPPY1/2 so all twelve
- * physical buttons remain individually addressable.
+ * Older revisions matched the entire 16-bit value, which made presses appear
+ * to stick or disappear as soon as another bit changed. Decode each bit
+ * independently and emit proper press/release transitions instead.
  */
 static const struct t501_pad_button t501_pad_buttons[] = {
-	{ 65329, BTN_0, "Pad1" },
-	{ 65315, BTN_1, "Pad2" },
-	{ 32563, BTN_2, "Pad3" },
-	{ 65330, BTN_3, "Pad4" },
-	{ 48947, BTN_4, "Pad5" },
-	{ 65299, BTN_5, "Pad6" },
-	{ 57139, BTN_6, "Pad7" },
-	{ 65075, BTN_7, "Pad8" },
-	{ 61235, BTN_8, "Pad9" },
-	{ 64819, BTN_9, "Pad10" },
-	{ 63283, BTN_TRIGGER_HAPPY1, "Pad11" },
-	{ 64307, BTN_TRIGGER_HAPPY2, "Pad12" },
+	{ 0x0002, BTN_0, "Pad1" },
+	{ 0x0010, BTN_1, "Pad2" },
+	{ 0x8000, BTN_2, "Pad3" },
+	{ 0x0001, BTN_3, "Pad4" },
+	{ 0x4000, BTN_4, "Pad5" },
+	{ 0x0020, BTN_5, "Pad6" },
+	{ 0x2000, BTN_6, "Pad7" },
+	{ 0x0100, BTN_7, "Pad8" },
+	{ 0x1000, BTN_8, "Pad9" },
+	{ 0x0200, BTN_9, "Pad10" },
+	{ 0x0800, BTN_TRIGGER_HAPPY1, "Pad11" },
+	{ 0x0400, BTN_TRIGGER_HAPPY2, "Pad12" },
 };
-
-static const struct t501_pad_button *t501_pad_button_by_raw(u16 raw)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(t501_pad_buttons); i++)
-		if (t501_pad_buttons[i].raw == raw)
-			return &t501_pad_buttons[i];
-	return NULL;
-}
-
-static void t501_emit_pad_key(struct input_dev *pad, u16 raw, int value)
-{
-	const struct t501_pad_button *button = t501_pad_button_by_raw(raw);
-
-	if (button)
-		input_report_key(pad, button->code, value);
-}
-
-static bool t501_pad_key_known(u16 raw)
-{
-	return t501_pad_button_by_raw(raw) != NULL;
-}
 
 static void t501_report_pad(struct t501_state *st, u16 raw)
 {
-	const struct t501_pad_button *button;
+	u16 old_state, new_state, changed;
+	int i;
 
-	if (!st->pad || raw == st->last_pad_key)
+	if (!st->pad)
 		return;
 
-	if (t501_pad_key_known(st->last_pad_key))
-		t501_emit_pad_key(st->pad, st->last_pad_key, 0);
+	old_state = st->last_pad_state;
+	new_state = raw;
+	changed = old_state ^ new_state;
+	if (!changed)
+		return;
 
-	button = t501_pad_button_by_raw(raw);
-	if (button) {
-		t501_emit_pad_key(st->pad, raw, 1);
+	for (i = 0; i < ARRAY_SIZE(t501_pad_buttons); i++) {
+		const struct t501_pad_button *button = &t501_pad_buttons[i];
+		bool was_down, is_down;
+
+		if (!(changed & button->active_low_mask))
+			continue;
+
+		was_down = !(old_state & button->active_low_mask);
+		is_down = !(new_state & button->active_low_mask);
+		if (was_down == is_down)
+			continue;
+
+		input_report_key(st->pad, button->code, is_down);
 		if (unlikely(debug_packets))
-			hid_info(st->hdev, "%s pressed (raw=0x%04x)\n",
-				 button->name, raw);
-	} else if (raw != T501_PAD_IDLE && unlikely(debug_packets)) {
-		hid_info(st->hdev, "unknown pad button raw=0x%04x\n", raw);
+			hid_info(st->hdev, "%s %s (raw=0x%04x)\n",
+				 button->name, is_down ? "pressed" : "released", raw);
 	}
 
-	st->last_pad_key = raw;
+	st->last_pad_state = new_state;
 	input_sync(st->pad);
 }
 
@@ -435,7 +423,7 @@ static int t501_create_pad(struct t501_state *st)
 	if (ret)
 		return ret;
 	st->pad = pad;
-	st->last_pad_key = T501_PAD_IDLE;
+	st->last_pad_state = T501_PAD_IDLE;
 	return 0;
 }
 

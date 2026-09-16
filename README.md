@@ -1,7 +1,7 @@
 # Cytech T501 Linux Driver
 
 > [!WARNING]
-> **v1.0.5 current test release.** The driver reads interface 1's 64-byte interrupt endpoint (`0x83`) directly, sends the vendor full-area sequence through USB control transfers, and now exposes all twelve frame buttons as remappable Linux input buttons. It is working on the tested T501, but broader hardware testing is still welcome.
+> **v1.0.6 current test release.** The driver reads interface 1's 64-byte interrupt endpoint (`0x83`) directly, sends the vendor full-area sequence through USB control transfers, and now exposes all twelve frame buttons as remappable Linux input buttons. It is working on the tested T501, but broader hardware testing is still welcome.
 
 Native Linux HID driver research for the SZ PING-IT / Gotop **T501** graphics tablet with USB ID `08f2:6811` and product string **`[T501] Driver Inside Tablet`**.
 
@@ -59,20 +59,20 @@ Load manually for testing:
 sudo insmod hid-cytech-t501.ko
 ```
 
-v1.0.5 bypasses the broken generic-HID receive path for the vendor packet stream. It still uses the Linux HID layer for device binding/hidraw, but owns a direct interrupt URB for endpoint `0x83`.
+v1.0.6 bypasses the broken generic-HID receive path for the vendor packet stream. It still uses the Linux HID layer for device binding/hidraw, but owns a direct interrupt URB for endpoint `0x83`.
 
 ## DKMS install
 
 The installer also installs the udev tablet-pad classification rule for the frame buttons.
 
 ```bash
-sudo mkdir -p /usr/src/cytech-t501-1.0.5
-sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.5/
+sudo mkdir -p /usr/src/cytech-t501-1.0.6
+sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.6/
 sudo cp 99-cytech-t501-pad.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo dkms add -m cytech-t501 -v 1.0.5
-sudo dkms build -m cytech-t501 -v 1.0.5
-sudo dkms install -m cytech-t501 -v 1.0.5
+sudo dkms add -m cytech-t501 -v 1.0.6
+sudo dkms build -m cytech-t501 -v 1.0.6
+sudo dkms install -m cytech-t501 -v 1.0.6
 sudo modprobe hid-cytech-t501
 ```
 
@@ -86,7 +86,7 @@ Cytech T501 Pad Buttons
 
 ## Tablet frame buttons
 
-The T501 sends twelve distinct frame-button values. Older revisions of this driver hard-coded them to keyboard shortcuts. v1.0.5 exposes them as real evdev pad buttons instead:
+The T501 sends twelve distinct frame-button values. Older revisions of this driver hard-coded them to keyboard shortcuts. v1.0.6 exposes them as real evdev pad buttons instead:
 
 ```text
 Pad1..Pad10  -> BTN_0..BTN_9
@@ -141,3 +141,7 @@ See [`REVERSE_ENGINEERING.md`](REVERSE_ENGINEERING.md) for packet format, featur
 ## License
 
 GPL-2.0-only. See [`LICENSE`](LICENSE).
+
+### Pad bitfield note (v1.0.6)
+
+The frame-button bytes are an **active-low bitfield**, not one 16-bit key value. This means simultaneous presses are valid. v1.0.6 decodes each of the 12 bits independently and emits correct press/release transitions; e.g. `0xfa33` represents two active buttons rather than an unknown key.
