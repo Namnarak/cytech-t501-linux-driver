@@ -1,7 +1,7 @@
 # Cytech T501 Linux Driver
 
 > [!WARNING]
-> **Experimental / not recommended for daily use yet.** The current native kernel module can bind successfully and expose `Cytech T501 Pen`, but on the tested T501 firmware the report stream may stop or the USB device may reset with `error -71`. Do **not** treat v1.0.1 as a stable release. A userspace absolute-tablet implementation is currently the known-working path while the kernel transport is being fixed.
+> **v1.0.4 transport fix candidate.** v1.0.1 used the generic HID receive path for vendor report `0x06`; this tablet omits that report from its HID descriptor, so the kernel could bind without actually delivering pen packets. v1.0.4 now reads interface 1's 64-byte interrupt endpoint (`0x83`) directly and sends the full-area feature sequence with direct USB control transfers, matching the known-working userspace implementation. Keep this release experimental until it has broader hardware testing.
 
 Native Linux HID driver research for the SZ PING-IT / Gotop **T501** graphics tablet with USB ID `08f2:6811` and product string **`[T501] Driver Inside Tablet`**.
 
@@ -13,8 +13,9 @@ This driver was reverse-engineered from the tablet's bundled Windows driver and 
 - PC/full-area initialization: working
 - Absolute coordinates / pressure model: working
 - Kernel HID device creation: working
-- Kernel USB/HID report transport: **experimental; currently has a regression on the tested device**
-- Userspace absolute-tablet path: currently used as the stable fallback during development
+- Kernel USB/HID report transport: **v1.0.4 direct-URB fix installed and under hardware verification**
+- Direct feature-report control path: working on the tested device
+- Userspace absolute-tablet path: retained as a fallback during development
 
 ## Intended features
 
@@ -57,18 +58,18 @@ For development/testing only:
 sudo insmod hid-cytech-t501.ko
 ```
 
-If the device begins resetting or disappears from USB, unload the module and physically reconnect the tablet. The kernel path is still under active development.
+v1.0.4 bypasses the broken generic-HID receive path for the vendor packet stream. It still uses the Linux HID layer for device binding/hidraw, but owns a direct interrupt URB for endpoint `0x83`.
 
 ## DKMS install (experimental)
 
-The DKMS path is retained for development, but is **not recommended for normal users until the transport regression is fixed**.
+The DKMS path installs the current v1.0.4 transport fix. This is still an experimental hardware driver; keep a fallback input device available while testing.
 
 ```bash
-sudo mkdir -p /usr/src/cytech-t501-1.0.1
-sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.1/
-sudo dkms add -m cytech-t501 -v 1.0.1
-sudo dkms build -m cytech-t501 -v 1.0.1
-sudo dkms install -m cytech-t501 -v 1.0.1
+sudo mkdir -p /usr/src/cytech-t501-1.0.4
+sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.4/
+sudo dkms add -m cytech-t501 -v 1.0.4
+sudo dkms build -m cytech-t501 -v 1.0.4
+sudo dkms install -m cytech-t501 -v 1.0.4
 sudo modprobe hid-cytech-t501
 ```
 

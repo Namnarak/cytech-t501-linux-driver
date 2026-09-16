@@ -79,6 +79,10 @@ struct t501_state {
 	bool touching;
 	u16 last_pad_key;
 	u64 packets;
+	struct urb *data_urb;
+	u8 *data_buf;
+	int data_buf_len;
+	bool transport_running;
 };
 
 static int t501_iface_number(struct hid_device *hdev)
@@ -213,29 +217,133 @@ static void t501_report_pc_pen(struct t501_state *st, const u8 *data)
 	input_sync(pen);
 }
 
-static int t501_raw_event(struct hid_device *hdev, struct hid_report *report,
-			  u8 *data, int size)
+static void t501_process_packet(struct t501_state *st, const u8 *data, int size)
 {
-	struct t501_state *st = hid_get_drvdata(hdev);
 	u16 pad_key;
 
-	if (!st || st->ifnum != T501_IFACE_DATA)
-		return 0;
-	if (size < T501_PC_MIN_REPORT_SIZE || data[0] != T501_PC_REPORT_ID)
-		return 0;
+	if (!st || size < T501_PC_MIN_REPORT_SIZE || data[0] != T501_PC_REPORT_ID)
+		return;
 
 	st->packets++;
 	if (unlikely(debug_packets && (st->packets <= 8 || !(st->packets % 500))))
-		hid_info(hdev,
-			 "pkt=%llu len=%d %*phN\n",
+		hid_info(st->hdev, "pkt=%llu len=%d %*phN\n",
 			 st->packets, size, min(size, 16), data);
 
 	pad_key = ((u16)data[11] << 8) | data[12];
 	t501_report_pad(st, pad_key);
 	t501_report_pc_pen(st, data);
+}
 
-	/* Positive means handled: suppress generic parsing without reporting an error. */
-	return 1;
+static void t501_data_irq(struct urb *urb)
+{
+	struct t501_state *st = urb->context;
+	int ret;
+
+	if (!st)
+		return;
+
+	switch (urb->status) {
+	case 0:
+		t501_process_packet(st, st->data_buf, urb->actual_length);
+		break;
+	case -ENOENT:
+	case -ECONNRESET:
+	case -ESHUTDOWN:
+		return;
+	case -EPIPE:
+		/* Endpoint halt is unusual on this tablet; recover on next submit. */
+		break;
+	default:
+		if (debug_packets)
+			hid_warn(st->hdev, "interrupt status %d\n", urb->status);
+		break;
+	}
+
+	if (!READ_ONCE(st->transport_running))
+		return;
+
+	ret = usb_submit_urb(urb, GFP_ATOMIC);
+	if (ret && ret != -ENODEV && ret != -EPERM)
+		hid_err(st->hdev, "failed to resubmit data URB: %d\n", ret);
+}
+
+static int t501_start_data_transport(struct t501_state *st)
+{
+	struct usb_interface *intf = to_usb_interface(st->hdev->dev.parent);
+	struct usb_device *udev = interface_to_usbdev(intf);
+	struct usb_host_interface *alts = intf->cur_altsetting;
+	struct usb_endpoint_descriptor *ep = NULL;
+	int i, pipe, interval, len, ret;
+
+	for (i = 0; i < alts->desc.bNumEndpoints; i++) {
+		struct usb_endpoint_descriptor *candidate = &alts->endpoint[i].desc;
+		if (usb_endpoint_is_int_in(candidate) &&
+		    usb_endpoint_maxp(candidate) >= T501_PC_MIN_REPORT_SIZE) {
+			ep = candidate;
+			if (usb_endpoint_maxp(candidate) == 64)
+				break;
+		}
+	}
+	if (!ep)
+		return -ENODEV;
+
+	len = usb_endpoint_maxp(ep);
+	st->data_buf = kmalloc(len, GFP_KERNEL);
+	if (!st->data_buf)
+		return -ENOMEM;
+	st->data_buf_len = len;
+
+	st->data_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!st->data_urb) {
+		kfree(st->data_buf);
+		st->data_buf = NULL;
+		return -ENOMEM;
+	}
+
+	pipe = usb_rcvintpipe(udev, ep->bEndpointAddress);
+	interval = ep->bInterval;
+	usb_fill_int_urb(st->data_urb, udev, pipe, st->data_buf, len,
+			 t501_data_irq, st, interval);
+	WRITE_ONCE(st->transport_running, true);
+	ret = usb_submit_urb(st->data_urb, GFP_KERNEL);
+	if (ret) {
+		WRITE_ONCE(st->transport_running, false);
+		usb_free_urb(st->data_urb);
+		st->data_urb = NULL;
+		kfree(st->data_buf);
+		st->data_buf = NULL;
+		return ret;
+	}
+
+	hid_info(st->hdev, "direct interrupt transport started on endpoint 0x%02x (%d bytes)\n",
+		 ep->bEndpointAddress, len);
+	return 0;
+}
+
+static void t501_stop_data_transport(struct t501_state *st)
+{
+	if (!st)
+		return;
+	WRITE_ONCE(st->transport_running, false);
+	if (st->data_urb) {
+		usb_kill_urb(st->data_urb);
+		usb_free_urb(st->data_urb);
+		st->data_urb = NULL;
+	}
+	kfree(st->data_buf);
+	st->data_buf = NULL;
+}
+
+static int t501_raw_event(struct hid_device *hdev, struct hid_report *report,
+			  u8 *data, int size)
+{
+	/*
+	 * The T501 emits report 0x06 even though its HID descriptor does not
+	 * describe that report.  Some usbhid paths discard it before raw_event().
+	 * We therefore read interface 1's interrupt endpoint directly above.
+	 * Keep raw_event passive so ordinary descriptor reports are unaffected.
+	 */
+	return 0;
 }
 
 static int t501_create_pen(struct t501_state *st)
@@ -319,21 +427,40 @@ static int t501_enable_full_mode(struct hid_device *hdev)
 		{ 0x08, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 },
 		{ 0x08, 0x03, 0x00, 0xff, 0xf0, 0x00, 0xff, 0xf0 },
 	};
-	u8 buf[8];
-	int i, ret;
+	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
+	struct usb_device *udev = interface_to_usbdev(intf);
+	u8 *buf;
+	int i, ret = 0;
+
+	buf = kmalloc(8, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	for (i = 0; i < ARRAY_SIZE(reports); i++) {
-		memcpy(buf, reports[i], sizeof(buf));
-		ret = hid_hw_raw_request(hdev, 0x08, buf, sizeof(buf),
-					 HID_FEATURE_REPORT, HID_REQ_SET_REPORT);
-		if (ret < 0) {
-			hid_err(hdev, "full-area init report %d failed: %d\n", i, ret);
-			return ret;
+		memcpy(buf, reports[i], 8);
+		/* Mirror the vendor/userspace path exactly: bmRequestType=0x21,
+		 * SET_REPORT, wValue=0x0308, wIndex=2. */
+		ret = usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
+				      HID_REQ_SET_REPORT,
+				      USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+				      0x0308, T501_IFACE_CONTROL,
+				      buf, 8, 250);
+		if (ret == -ETIMEDOUT) {
+			hid_warn(hdev, "full-area report %d timed out; continuing\n", i + 1);
+			ret = 0;
+		} else if (ret < 0) {
+			hid_err(hdev, "full-area init report %d failed: %d\n", i + 1, ret);
+			break;
+		} else {
+			/* usb_control_msg returns the number of bytes transferred. */
+			ret = 0;
 		}
 		msleep(20);
 	}
-	hid_info(hdev, "T501 PC/full-area mode enabled\n");
-	return 0;
+	kfree(buf);
+	if (!ret)
+		hid_info(hdev, "T501 PC/full-area mode enabled via direct USB control\n");
+	return ret;
 }
 
 static int t501_probe(struct hid_device *hdev, const struct hid_device_id *id)
@@ -376,6 +503,15 @@ static int t501_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (ret)
 		return ret;
 
+	if (ifnum == T501_IFACE_DATA) {
+		ret = t501_start_data_transport(st);
+		if (ret) {
+			hid_err(hdev, "failed to start direct data transport: %d\n", ret);
+			hid_hw_stop(hdev);
+			return ret;
+		}
+	}
+
 	if (ifnum == T501_IFACE_CONTROL) {
 		ret = t501_enable_full_mode(hdev);
 		if (ret) {
@@ -390,6 +526,10 @@ static int t501_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 static void t501_remove(struct hid_device *hdev)
 {
+	struct t501_state *st = hid_get_drvdata(hdev);
+
+	if (st && st->ifnum == T501_IFACE_DATA)
+		t501_stop_data_transport(st);
 	hid_hw_stop(hdev);
 }
 

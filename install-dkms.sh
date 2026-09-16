@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-VERSION="1.0.1"
+VERSION="1.0.4"
 NAME="cytech-t501"
 SRC="/usr/src/${NAME}-${VERSION}"
 if [[ $EUID -ne 0 ]]; then
