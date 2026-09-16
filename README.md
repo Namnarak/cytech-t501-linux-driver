@@ -1,10 +1,22 @@
 # Cytech T501 Linux Driver
 
-Native Linux HID driver for the SZ PING-IT / Gotop **T501** graphics tablet with USB ID `08f2:6811` and product string **`[T501] Driver Inside Tablet`**.
+> [!WARNING]
+> **Experimental / not recommended for daily use yet.** The current native kernel module can bind successfully and expose `Cytech T501 Pen`, but on the tested T501 firmware the report stream may stop or the USB device may reset with `error -71`. Do **not** treat v1.0.1 as a stable release. A userspace absolute-tablet implementation is currently the known-working path while the kernel transport is being fixed.
 
-This driver was reverse-engineered from the tablet's bundled Windows driver and the vendor's 2018 macOS `MyTabletDaemon`. It exposes the device as a real Linux tablet instead of translating it into a relative mouse.
+Native Linux HID driver research for the SZ PING-IT / Gotop **T501** graphics tablet with USB ID `08f2:6811` and product string **`[T501] Driver Inside Tablet`**.
 
-## Features
+This driver was reverse-engineered from the tablet's bundled Windows driver and the vendor's 2018 macOS `MyTabletDaemon`. The goal is to expose the device as a real Linux tablet instead of translating it into a relative mouse.
+
+## Current status
+
+- Protocol decoding: working
+- PC/full-area initialization: working
+- Absolute coordinates / pressure model: working
+- Kernel HID device creation: working
+- Kernel USB/HID report transport: **experimental; currently has a regression on the tested device**
+- Userspace absolute-tablet path: currently used as the stable fallback during development
+
+## Intended features
 
 - Native absolute pen coordinates
 - Pressure reporting (`0..2047`)
@@ -25,7 +37,7 @@ Product: [T501] Driver Inside Tablet
 
 `08f2:6811` is reused by other tablet-family devices, so the driver also checks the product name and is intended for this T501 variant.
 
-## Build
+## Build (experimental kernel module)
 
 Requirements on Arch/CachyOS:
 
@@ -39,13 +51,17 @@ Build against the running kernel:
 make LLVM=1
 ```
 
-Load manually for testing:
+For development/testing only:
 
 ```bash
 sudo insmod hid-cytech-t501.ko
 ```
 
-## DKMS install
+If the device begins resetting or disappears from USB, unload the module and physically reconnect the tablet. The kernel path is still under active development.
+
+## DKMS install (experimental)
+
+The DKMS path is retained for development, but is **not recommended for normal users until the transport regression is fixed**.
 
 ```bash
 sudo mkdir -p /usr/src/cytech-t501-1.0.1
@@ -56,7 +72,7 @@ sudo dkms install -m cytech-t501 -v 1.0.1
 sudo modprobe hid-cytech-t501
 ```
 
-After loading, reconnect the tablet. Linux should expose input devices similar to:
+When the kernel path works, Linux exposes input devices similar to:
 
 ```text
 Cytech T501 Pen
@@ -65,7 +81,7 @@ Cytech T501 Pad Buttons
 
 ## Wayland / compositor mapping
 
-The kernel driver intentionally does not know about monitors. Output mapping belongs to the compositor.
+The driver intentionally does not know about monitors. Output mapping belongs to the compositor.
 
 For **labwc**, for example:
 
