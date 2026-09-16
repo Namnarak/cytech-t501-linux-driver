@@ -1,3 +1,2 @@
-# T501 frame controls expose both native tablet-pad buttons and optional
-# vendor-style keyboard shortcuts from the same evdev node.
-ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Cytech T501 Pad Buttons", ENV{ID_INPUT}="1", ENV{ID_INPUT_KEY}="1", ENV{ID_INPUT_JOYSTICK}="0", ENV{ID_INPUT_TABLET_PAD}="1"
+# Cytech T501 native frame-button device. Keep it a pure tablet pad.
+ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Cytech T501 Pad Buttons", ENV{ID_INPUT}="1", ENV{ID_INPUT_KEY}="0", ENV{ID_INPUT_JOYSTICK}="0", ENV{ID_INPUT_TABLET_PAD}="1"

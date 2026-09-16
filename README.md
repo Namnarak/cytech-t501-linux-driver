@@ -98,6 +98,10 @@ The included udev rule marks `Cytech T501 Pad Buttons` as `ID_INPUT_TABLET_PAD=1
 
 On labwc, the compositor currently exposes pad mappings as `Pad`, `Pad2`, ... `Pad9`; additional buttons are still available at the evdev level for applications/remappers.
 
+### Compatibility shortcuts
+
+By default (`legacy_pad_shortcuts=1`), the driver creates a separate `Cytech T501 Pad Shortcuts` keyboard device and emits the vendor-style shortcut there. Keeping keyboard events on a separate input device avoids compositors classifying them as tablet-pad-only and ignoring the shortcut keys. Set `legacy_pad_shortcuts=0` to expose only native pad buttons.
+
 ## Wayland / compositor mapping
 
 The driver intentionally does not know about monitors. Output mapping belongs to the compositor.

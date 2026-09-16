@@ -79,6 +79,7 @@ struct t501_state {
 	struct hid_device *hdev;
 	struct input_dev *pen;
 	struct input_dev *pad;
+	struct input_dev *keys;
 	u8 ifnum;
 	bool touching;
 	u16 last_pad_state;
@@ -146,6 +147,54 @@ static const struct t501_pad_button t501_pad_buttons[] = {
 	{ 0x0400, BTN_TRIGGER_HAPPY2, "Pad12" },
 };
 
+static void t501_emit_legacy_shortcut(struct input_dev *keys, int index, bool down)
+{
+	int value = down ? 1 : 0;
+
+	switch (index) {
+	case 0:
+		input_report_key(keys, KEY_E, value);
+		break;
+	case 1:
+		input_report_key(keys, KEY_B, value);
+		break;
+	case 2:
+		input_report_key(keys, KEY_LEFTCTRL, value);
+		input_report_key(keys, KEY_KPMINUS, value);
+		break;
+	case 3:
+		input_report_key(keys, KEY_LEFTCTRL, value);
+		input_report_key(keys, KEY_KPPLUS, value);
+		break;
+	case 4:
+		input_report_key(keys, KEY_LEFTBRACE, value);
+		break;
+	case 5:
+		input_report_key(keys, KEY_RIGHTBRACE, value);
+		break;
+	case 6:
+		input_report_key(keys, KEY_SCROLLUP, value);
+		break;
+	case 7:
+		input_report_key(keys, KEY_TAB, value);
+		break;
+	case 8:
+		input_report_key(keys, KEY_SCROLLDOWN, value);
+		break;
+	case 9:
+		input_report_key(keys, KEY_SPACE, value);
+		break;
+	case 10:
+		input_report_key(keys, KEY_LEFTCTRL, value);
+		break;
+	case 11:
+		input_report_key(keys, KEY_LEFTALT, value);
+		break;
+	default:
+		break;
+	}
+}
+
 static void t501_report_pad(struct t501_state *st, u16 raw)
 {
 	u16 old_state, new_state, changed;
@@ -173,6 +222,10 @@ static void t501_report_pad(struct t501_state *st, u16 raw)
 			continue;
 
 		input_report_key(st->pad, button->code, is_down);
+		if (READ_ONCE(legacy_pad_shortcuts) && st->keys) {
+			t501_emit_legacy_shortcut(st->keys, i, is_down);
+			input_sync(st->keys);
+		}
 		if (unlikely(debug_packets))
 			hid_info(st->hdev, "%s %s (raw=0x%04x)\n",
 				 button->name, is_down ? "pressed" : "released", raw);
@@ -423,26 +476,52 @@ static int t501_create_pad(struct t501_state *st)
 	for (ret = 0; ret < ARRAY_SIZE(t501_pad_buttons); ret++)
 		input_set_capability(pad, EV_KEY, t501_pad_buttons[ret].code);
 
-	/* Optional vendor-style defaults so frame keys do something immediately.
-	 * Native BTN_* events are still emitted in parallel and remain remappable. */
-	input_set_capability(pad, EV_KEY, KEY_E);
-	input_set_capability(pad, EV_KEY, KEY_B);
-	input_set_capability(pad, EV_KEY, KEY_LEFTCTRL);
-	input_set_capability(pad, EV_KEY, KEY_KPMINUS);
-	input_set_capability(pad, EV_KEY, KEY_KPPLUS);
-	input_set_capability(pad, EV_KEY, KEY_LEFTBRACE);
-	input_set_capability(pad, EV_KEY, KEY_RIGHTBRACE);
-	input_set_capability(pad, EV_KEY, KEY_SCROLLUP);
-	input_set_capability(pad, EV_KEY, KEY_SCROLLDOWN);
-	input_set_capability(pad, EV_KEY, KEY_TAB);
-	input_set_capability(pad, EV_KEY, KEY_SPACE);
-	input_set_capability(pad, EV_KEY, KEY_LEFTALT);
 
 	ret = input_register_device(pad);
 	if (ret)
 		return ret;
 	st->pad = pad;
 	st->last_pad_state = T501_PAD_IDLE;
+	return 0;
+}
+
+static int t501_create_keys(struct t501_state *st)
+{
+	struct input_dev *keys;
+	int ret;
+
+	if (!READ_ONCE(legacy_pad_shortcuts))
+		return 0;
+
+	keys = devm_input_allocate_device(&st->hdev->dev);
+	if (!keys)
+		return -ENOMEM;
+
+	keys->name = "Cytech T501 Pad Shortcuts";
+	keys->phys = st->hdev->phys;
+	keys->id.bustype = BUS_USB;
+	keys->id.vendor = T501_VENDOR_ID;
+	keys->id.product = T501_PRODUCT_ID;
+	keys->id.version = st->hdev->version;
+	keys->dev.parent = &st->hdev->dev;
+
+	input_set_capability(keys, EV_KEY, KEY_E);
+	input_set_capability(keys, EV_KEY, KEY_B);
+	input_set_capability(keys, EV_KEY, KEY_LEFTCTRL);
+	input_set_capability(keys, EV_KEY, KEY_KPMINUS);
+	input_set_capability(keys, EV_KEY, KEY_KPPLUS);
+	input_set_capability(keys, EV_KEY, KEY_LEFTBRACE);
+	input_set_capability(keys, EV_KEY, KEY_RIGHTBRACE);
+	input_set_capability(keys, EV_KEY, KEY_SCROLLUP);
+	input_set_capability(keys, EV_KEY, KEY_SCROLLDOWN);
+	input_set_capability(keys, EV_KEY, KEY_TAB);
+	input_set_capability(keys, EV_KEY, KEY_SPACE);
+	input_set_capability(keys, EV_KEY, KEY_LEFTALT);
+
+	ret = input_register_device(keys);
+	if (ret)
+		return ret;
+	st->keys = keys;
 	return 0;
 }
 
@@ -521,6 +600,9 @@ static int t501_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		if (ret)
 			return ret;
 		ret = t501_create_pad(st);
+		if (ret)
+			return ret;
+		ret = t501_create_keys(st);
 		if (ret)
 			return ret;
 	}
