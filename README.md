@@ -1,7 +1,7 @@
 # Cytech T501 Linux Driver
 
 > [!WARNING]
-> **v1.0.4 transport fix candidate.** v1.0.1 used the generic HID receive path for vendor report `0x06`; this tablet omits that report from its HID descriptor, so the kernel could bind without actually delivering pen packets. v1.0.4 now reads interface 1's 64-byte interrupt endpoint (`0x83`) directly and sends the full-area feature sequence with direct USB control transfers, matching the known-working userspace implementation. Keep this release experimental until it has broader hardware testing.
+> **v1.0.5 current test release.** The driver reads interface 1's 64-byte interrupt endpoint (`0x83`) directly, sends the vendor full-area sequence through USB control transfers, and now exposes all twelve frame buttons as remappable Linux input buttons. It is working on the tested T501, but broader hardware testing is still welcome.
 
 Native Linux HID driver research for the SZ PING-IT / Gotop **T501** graphics tablet with USB ID `08f2:6811` and product string **`[T501] Driver Inside Tablet`**.
 
@@ -13,9 +13,10 @@ This driver was reverse-engineered from the tablet's bundled Windows driver and 
 - PC/full-area initialization: working
 - Absolute coordinates / pressure model: working
 - Kernel HID device creation: working
-- Kernel USB/HID report transport: **v1.0.4 direct-URB fix installed and under hardware verification**
+- Kernel USB/HID report transport: direct interrupt URB on endpoint `0x83`, working on the tested device
 - Direct feature-report control path: working on the tested device
-- Userspace absolute-tablet path: retained as a fallback during development
+- Native frame buttons: 12 distinct remappable buttons
+- Userspace absolute-tablet path: retained only as a development fallback
 
 ## Intended features
 
@@ -23,7 +24,7 @@ This driver was reverse-engineered from the tablet's bundled Windows driver and 
 - Pressure reporting (`0..2047`)
 - Pen tip / proximity
 - Two stylus side buttons
-- Tablet shortcut buttons
+- 12 individually addressable tablet frame buttons
 - PC/full-area mode initialization
 - Keeps the built-in driver CD / mass-storage interface untouched
 - DKMS support for automatic rebuilds after kernel updates
@@ -38,7 +39,7 @@ Product: [T501] Driver Inside Tablet
 
 `08f2:6811` is reused by other tablet-family devices, so the driver also checks the product name and is intended for this T501 variant.
 
-## Build (experimental kernel module)
+## Build
 
 Requirements on Arch/CachyOS:
 
@@ -52,24 +53,26 @@ Build against the running kernel:
 make LLVM=1
 ```
 
-For development/testing only:
+Load manually for testing:
 
 ```bash
 sudo insmod hid-cytech-t501.ko
 ```
 
-v1.0.4 bypasses the broken generic-HID receive path for the vendor packet stream. It still uses the Linux HID layer for device binding/hidraw, but owns a direct interrupt URB for endpoint `0x83`.
+v1.0.5 bypasses the broken generic-HID receive path for the vendor packet stream. It still uses the Linux HID layer for device binding/hidraw, but owns a direct interrupt URB for endpoint `0x83`.
 
-## DKMS install (experimental)
+## DKMS install
 
-The DKMS path installs the current v1.0.4 transport fix. This is still an experimental hardware driver; keep a fallback input device available while testing.
+The installer also installs the udev tablet-pad classification rule for the frame buttons.
 
 ```bash
-sudo mkdir -p /usr/src/cytech-t501-1.0.4
-sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.4/
-sudo dkms add -m cytech-t501 -v 1.0.4
-sudo dkms build -m cytech-t501 -v 1.0.4
-sudo dkms install -m cytech-t501 -v 1.0.4
+sudo mkdir -p /usr/src/cytech-t501-1.0.5
+sudo cp hid-cytech-t501.c Makefile dkms.conf /usr/src/cytech-t501-1.0.5/
+sudo cp 99-cytech-t501-pad.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo dkms add -m cytech-t501 -v 1.0.5
+sudo dkms build -m cytech-t501 -v 1.0.5
+sudo dkms install -m cytech-t501 -v 1.0.5
 sudo modprobe hid-cytech-t501
 ```
 
@@ -79,6 +82,21 @@ When the kernel path works, Linux exposes input devices similar to:
 Cytech T501 Pen
 Cytech T501 Pad Buttons
 ```
+
+
+## Tablet frame buttons
+
+The T501 sends twelve distinct frame-button values. Older revisions of this driver hard-coded them to keyboard shortcuts. v1.0.5 exposes them as real evdev pad buttons instead:
+
+```text
+Pad1..Pad10  -> BTN_0..BTN_9
+Pad11        -> BTN_TRIGGER_HAPPY1
+Pad12        -> BTN_TRIGGER_HAPPY2
+```
+
+The included udev rule marks `Cytech T501 Pad Buttons` as `ID_INPUT_TABLET_PAD=1`, so libinput/Wayland compositors can treat it as a tablet pad rather than a keyboard or joystick. Stylus side buttons remain `BTN_STYLUS` and `BTN_STYLUS2`.
+
+On labwc, the compositor currently exposes pad mappings as `Pad`, `Pad2`, ... `Pad9`; additional buttons are still available at the evdev level for applications/remappers.
 
 ## Wayland / compositor mapping
 

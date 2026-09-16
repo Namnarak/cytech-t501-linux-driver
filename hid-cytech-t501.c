@@ -112,51 +112,80 @@ static int t501_normalize_pressure(u16 raw)
 	return clamp(value, 0, T501_PRESSURE_MAX);
 }
 
+struct t501_pad_button {
+	u16 raw;
+	u16 code;
+	const char *name;
+};
+
+/*
+ * The T501 firmware sends one 16-bit value for each frame button.  Older
+ * versions of this driver translated those values directly into shortcuts
+ * (E/B/Ctrl/etc).  Expose them as real Linux pad buttons instead so the
+ * compositor or an application can remap them without changing the driver.
+ *
+ * BTN_0..BTN_9 are the canonical evdev tablet-pad button range.  The T501 has
+ * two additional frame buttons, exposed as BTN_TRIGGER_HAPPY1/2 so all twelve
+ * physical buttons remain individually addressable.
+ */
+static const struct t501_pad_button t501_pad_buttons[] = {
+	{ 65329, BTN_0, "Pad1" },
+	{ 65315, BTN_1, "Pad2" },
+	{ 32563, BTN_2, "Pad3" },
+	{ 65330, BTN_3, "Pad4" },
+	{ 48947, BTN_4, "Pad5" },
+	{ 65299, BTN_5, "Pad6" },
+	{ 57139, BTN_6, "Pad7" },
+	{ 65075, BTN_7, "Pad8" },
+	{ 61235, BTN_8, "Pad9" },
+	{ 64819, BTN_9, "Pad10" },
+	{ 63283, BTN_TRIGGER_HAPPY1, "Pad11" },
+	{ 64307, BTN_TRIGGER_HAPPY2, "Pad12" },
+};
+
+static const struct t501_pad_button *t501_pad_button_by_raw(u16 raw)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(t501_pad_buttons); i++)
+		if (t501_pad_buttons[i].raw == raw)
+			return &t501_pad_buttons[i];
+	return NULL;
+}
+
 static void t501_emit_pad_key(struct input_dev *pad, u16 raw, int value)
 {
-	switch (raw) {
-	case 65329: input_report_key(pad, KEY_E, value); break;
-	case 65315: input_report_key(pad, KEY_B, value); break;
-	case 32563:
-		input_report_key(pad, KEY_LEFTCTRL, value);
-		input_report_key(pad, KEY_KPMINUS, value);
-		break;
-	case 65330:
-		input_report_key(pad, KEY_LEFTCTRL, value);
-		input_report_key(pad, KEY_KPPLUS, value);
-		break;
-	case 48947: input_report_key(pad, KEY_LEFTBRACE, value); break;
-	case 65299: input_report_key(pad, KEY_RIGHTBRACE, value); break;
-	case 57139: input_report_key(pad, KEY_SCROLLUP, value); break;
-	case 65075: input_report_key(pad, KEY_TAB, value); break;
-	case 61235: input_report_key(pad, KEY_SCROLLDOWN, value); break;
-	case 64819: input_report_key(pad, KEY_SPACE, value); break;
-	case 63283: input_report_key(pad, KEY_LEFTCTRL, value); break;
-	case 64307: input_report_key(pad, KEY_LEFTALT, value); break;
-	default: break;
-	}
+	const struct t501_pad_button *button = t501_pad_button_by_raw(raw);
+
+	if (button)
+		input_report_key(pad, button->code, value);
 }
 
 static bool t501_pad_key_known(u16 raw)
 {
-	switch (raw) {
-	case 65329: case 65315: case 32563: case 65330:
-	case 48947: case 65299: case 57139: case 65075:
-	case 61235: case 64819: case 63283: case 64307:
-		return true;
-	default:
-		return false;
-	}
+	return t501_pad_button_by_raw(raw) != NULL;
 }
 
 static void t501_report_pad(struct t501_state *st, u16 raw)
 {
+	const struct t501_pad_button *button;
+
 	if (!st->pad || raw == st->last_pad_key)
 		return;
+
 	if (t501_pad_key_known(st->last_pad_key))
 		t501_emit_pad_key(st->pad, st->last_pad_key, 0);
-	if (t501_pad_key_known(raw))
+
+	button = t501_pad_button_by_raw(raw);
+	if (button) {
 		t501_emit_pad_key(st->pad, raw, 1);
+		if (unlikely(debug_packets))
+			hid_info(st->hdev, "%s pressed (raw=0x%04x)\n",
+				 button->name, raw);
+	} else if (raw != T501_PAD_IDLE && unlikely(debug_packets)) {
+		hid_info(st->hdev, "unknown pad button raw=0x%04x\n", raw);
+	}
+
 	st->last_pad_key = raw;
 	input_sync(st->pad);
 }
@@ -398,18 +427,9 @@ static int t501_create_pad(struct t501_state *st)
 	pad->id.version = st->hdev->version;
 	pad->dev.parent = &st->hdev->dev;
 
-	input_set_capability(pad, EV_KEY, KEY_E);
-	input_set_capability(pad, EV_KEY, KEY_B);
-	input_set_capability(pad, EV_KEY, KEY_LEFTCTRL);
-	input_set_capability(pad, EV_KEY, KEY_KPMINUS);
-	input_set_capability(pad, EV_KEY, KEY_KPPLUS);
-	input_set_capability(pad, EV_KEY, KEY_LEFTBRACE);
-	input_set_capability(pad, EV_KEY, KEY_RIGHTBRACE);
-	input_set_capability(pad, EV_KEY, KEY_SCROLLUP);
-	input_set_capability(pad, EV_KEY, KEY_SCROLLDOWN);
-	input_set_capability(pad, EV_KEY, KEY_TAB);
-	input_set_capability(pad, EV_KEY, KEY_SPACE);
-	input_set_capability(pad, EV_KEY, KEY_LEFTALT);
+	/* Expose hardware frame keys as remappable tablet-pad buttons. */
+	for (ret = 0; ret < ARRAY_SIZE(t501_pad_buttons); ret++)
+		input_set_capability(pad, EV_KEY, t501_pad_buttons[ret].code);
 
 	ret = input_register_device(pad);
 	if (ret)
