@@ -71,6 +71,10 @@ static bool debug_packets;
 module_param(debug_packets, bool, 0644);
 MODULE_PARM_DESC(debug_packets, "Log sampled raw T501 reports");
 
+static bool legacy_pad_shortcuts = true;
+module_param(legacy_pad_shortcuts, bool, 0644);
+MODULE_PARM_DESC(legacy_pad_shortcuts, "Also emit vendor-style keyboard shortcuts for frame buttons (default yes)");
+
 struct t501_state {
 	struct hid_device *hdev;
 	struct input_dev *pen;
@@ -418,6 +422,21 @@ static int t501_create_pad(struct t501_state *st)
 	/* Expose hardware frame keys as remappable tablet-pad buttons. */
 	for (ret = 0; ret < ARRAY_SIZE(t501_pad_buttons); ret++)
 		input_set_capability(pad, EV_KEY, t501_pad_buttons[ret].code);
+
+	/* Optional vendor-style defaults so frame keys do something immediately.
+	 * Native BTN_* events are still emitted in parallel and remain remappable. */
+	input_set_capability(pad, EV_KEY, KEY_E);
+	input_set_capability(pad, EV_KEY, KEY_B);
+	input_set_capability(pad, EV_KEY, KEY_LEFTCTRL);
+	input_set_capability(pad, EV_KEY, KEY_KPMINUS);
+	input_set_capability(pad, EV_KEY, KEY_KPPLUS);
+	input_set_capability(pad, EV_KEY, KEY_LEFTBRACE);
+	input_set_capability(pad, EV_KEY, KEY_RIGHTBRACE);
+	input_set_capability(pad, EV_KEY, KEY_SCROLLUP);
+	input_set_capability(pad, EV_KEY, KEY_SCROLLDOWN);
+	input_set_capability(pad, EV_KEY, KEY_TAB);
+	input_set_capability(pad, EV_KEY, KEY_SPACE);
+	input_set_capability(pad, EV_KEY, KEY_LEFTALT);
 
 	ret = input_register_device(pad);
 	if (ret)
