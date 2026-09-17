@@ -23,4 +23,4 @@ jobs:
       - name: Check kernel style
         run: '${{ steps.kernel.outputs.kdir }}/scripts/checkpatch.pl --no-tree -f hid-cytech-t501.c'
       - name: Build module
-        run: make LLVM=1 KDIR='${{ steps.kernel.outputs.kdir }}'
+        run: make KDIR='${{ steps.kernel.outputs.kdir }}'
