@@ -176,3 +176,19 @@ The frame-button bytes are an **active-low bitfield**, not one 16-bit key value.
 ### Default frame-button actions
 
 v1.0.11 keeps native pad button events and, by default, also emits the vendor-style keyboard shortcuts so the buttons work immediately in ordinary desktop applications. Disable this compatibility layer with `legacy_pad_shortcuts=0` if you only want raw remappable pad buttons.
+
+---
+
+<!-- CYTECH_STAR_HISTORY:START -->
+
+## Star History
+
+<a href="https://star-history.dera.page/#Namnarak/cytech-t501-linux-driver&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Namnarak/cytech-t501-linux-driver&type=date&legend=top-left&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Namnarak/cytech-t501-linux-driver&type=date&legend=top-left" />
+    <img alt="GitHub star history for Namnarak/cytech-t501-linux-driver" src="https://star-history.dera.page/svg?repos=Namnarak/cytech-t501-linux-driver&type=date&legend=top-left" width="800" />
+  </picture>
+</a>
+
+<!-- CYTECH_STAR_HISTORY:END -->
