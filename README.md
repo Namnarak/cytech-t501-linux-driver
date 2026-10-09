@@ -1,4 +1,18 @@
-# Cytech T501 Linux Driver
+<!-- CYTECH_README_REFRESH:START -->
+<div align="center">
+
+<a href="https://github.com/Namnarak/cytech-t501-linux-driver"><img width="100%" alt="Cytech T501 Driver banner" src="https://capsule-render.vercel.app/api?type=waving&color=0:181A22,100:E879F9&height=210&section=header&text=Cytech%20T501%20Driver&fontSize=43&fontColor=ffffff&fontAlignY=36&desc=Native%20Linux%20tablet%20input%20for%20the%20T501&descAlignY=59&descSize=16"></a>
+
+<img alt="PROJECT: Linux Driver" src="https://img.shields.io/badge/PROJECT-Linux%20Driver-E879F9?style=flat-square&labelColor=181A22"> <img alt="STACK: HID · DKMS" src="https://img.shields.io/badge/STACK-HID%20%C2%B7%20DKMS-E879F9?style=flat-square&labelColor=181A22">
+
+<p><strong>Native Linux tablet input for the T501</strong></p>
+
+<a href="https://github.com/Namnarak/cytech-t501-linux-driver/releases">Releases</a> · <a href="https://github.com/Namnarak/cytech-t501-linux-driver/issues">Issues</a> · <a href="https://github.com/Namnarak/cytech-t501-linux-driver">Source</a>
+
+</div>
+<!-- CYTECH_README_REFRESH:END -->
+
+---
 
 > [!WARNING]
 > **v1.0.11 current test release.** The driver reads interface 1's 64-byte interrupt endpoint (`0x83`) directly, sends the vendor full-area sequence through USB control transfers, and now exposes all twelve frame buttons as remappable Linux input buttons. It is working on the tested T501, but broader hardware testing is still welcome.
